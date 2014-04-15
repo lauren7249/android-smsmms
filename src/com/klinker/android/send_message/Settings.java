@@ -29,9 +29,6 @@ public class Settings {
     private String mmsc;
     private String proxy;
     private String port;
-    private String userAgent;
-    private String uaProfUrl;
-    private String uaProfTagName;
     private boolean group;
 
     // SMS options
@@ -63,9 +60,6 @@ public class Settings {
         this.mmsc = s.getMmsc();
         this.proxy = s.getProxy();
         this.port = s.getPort();
-        this.userAgent = s.getAgent();
-        this.uaProfUrl = s.getUserProfileUrl();
-        this.uaProfTagName = s.getUaProfTagName();
         this.group = s.getGroup();
         this.wifiMmsFix = s.getWifiMmsFix();
         this.deliveryReports = s.getDeliveryReports();
@@ -101,9 +95,6 @@ public class Settings {
         this.mmsc = mmsc;
         this.proxy = proxy;
         this.port = port;
-        this.userAgent = "";
-        this.uaProfUrl = "";
-        this.uaProfTagName = "";
         this.group = group;
         this.wifiMmsFix = wifiMmsFix;
         this.deliveryReports = deliveryReports;
@@ -164,27 +155,6 @@ public class Settings {
     public void setPort(String port) {
         this.port = port;
     }
-
-    /**
-     * Sets the user agent
-     *
-     * @param agent is the agent to send http request with
-     */
-    public void setAgent(String agent) { this.userAgent = agent; }
-
-    /**
-     * Sets the user agent profile url
-     *
-     * @param userProfileUrl is the user agent profile url
-     */
-    public void setUserProfileUrl(String userProfileUrl) { this.uaProfUrl = userProfileUrl; }
-
-    /**
-     * Sets the user agent profile tag name
-     *
-     * @param tagName the tag name to use
-     */
-    public void setUaProfTagName(String tagName) { this.uaProfTagName = tagName; }
 
     /**
      * Sets group MMS messages
@@ -305,21 +275,6 @@ public class Settings {
     public String getPort() {
         return this.port;
     }
-
-    /**
-     * @return the user agent to send mms with
-     */
-    public String getAgent() { return this.userAgent; }
-
-    /**
-     * @return the user agent profile url to send mms with
-     */
-    public String getUserProfileUrl() { return this.uaProfUrl; }
-
-    /**
-     * @return the user agent profile tag name
-     */
-    public String getUaProfTagName() { return this.uaProfTagName; }
 
     /**
      * @return whether or not to send Group MMS or multiple SMS/Voice messages

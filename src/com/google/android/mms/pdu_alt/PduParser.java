@@ -17,8 +17,10 @@
 
 package com.google.android.mms.pdu_alt;
 
+import android.content.res.Resources;
 import com.google.android.mms.ContentType;
 import com.google.android.mms.InvalidHeaderValueException;
+import com.google.android.mms.pdu_alt.EncodedStringValue;
 
 import android.util.Log;
 

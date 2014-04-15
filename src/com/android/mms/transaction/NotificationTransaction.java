@@ -34,8 +34,9 @@ import android.content.Intent;
 import android.database.sqlite.SqliteWrapper;
 import android.net.Uri;
 import android.os.Looper;
-import android.preference.PreferenceManager;
-import android.provider.Telephony;
+import android.provider.Telephony.Mms;
+import android.provider.Telephony.Threads;
+import android.provider.Telephony.Mms.Inbox;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
@@ -112,17 +113,9 @@ public class NotificationTransaction extends Transaction implements Runnable {
         try {
             // Save the pdu. If we can start downloading the real pdu immediately, don't allow
             // persist() to create a thread for the notificationInd because it causes UI jank.
-            boolean group;
-
-            try {
-                group = com.klinker.android.send_message.Transaction.settings.getGroup();
-            } catch (Exception e) {
-                group = PreferenceManager.getDefaultSharedPreferences(context).getBoolean("group_message", true);
-            }
-
             mUri = PduPersister.getPduPersister(context).persist(
-                        ind, Uri.parse("content://mms/inbox"), !allowAutoDownload(context),
-                        group, null);
+                        ind, Inbox.CONTENT_URI, !allowAutoDownload(context),
+                    com.klinker.android.send_message.Transaction.settings.getGroup(), null);
         } catch (MmsException e) {
             Log.e(TAG, "Failed to save NotificationInd in constructor.", e);
             throw new IllegalArgumentException();
@@ -143,7 +136,9 @@ public class NotificationTransaction extends Transaction implements Runnable {
 
     public static boolean allowAutoDownload(Context context) {
         try { Looper.prepare(); } catch (Exception e) { }
-        boolean autoDownload = PreferenceManager.getDefaultSharedPreferences(context).getBoolean("auto_download_mms", true);
+        DownloadManager.init(context);
+        DownloadManager downloadManager = DownloadManager.getInstance();
+        boolean autoDownload = downloadManager.isAuto();
         boolean dataSuspended = (((TelephonyManager) context.getSystemService(Service.TELEPHONY_SERVICE)).getDataState() ==
                 TelephonyManager.DATA_SUSPENDED);
         return autoDownload && !dataSuspended;
@@ -200,12 +195,12 @@ public class NotificationTransaction extends Transaction implements Runnable {
                 } else {
                     // Save the received PDU (must be a M-RETRIEVE.CONF).
                     PduPersister p = PduPersister.getPduPersister(mContext);
-                    Uri uri = p.persist(pdu, Uri.parse("content://mms/inbox"), true,
+                    Uri uri = p.persist(pdu, Inbox.CONTENT_URI, true,
                             com.klinker.android.send_message.Transaction.settings.getGroup(), null);
 
                     // Use local time instead of PDU time
                     ContentValues values = new ContentValues(1);
-                    values.put("date", System.currentTimeMillis() / 1000L);
+                    values.put(Mms.DATE, System.currentTimeMillis() / 1000L);
                     SqliteWrapper.update(mContext, mContext.getContentResolver(),
                             uri, values, null, null);
 
@@ -216,9 +211,7 @@ public class NotificationTransaction extends Transaction implements Runnable {
                     Log.v(TAG, "NotificationTransaction received new mms message: " + uri);
                     // Delete obsolete threads
                     SqliteWrapper.delete(mContext, mContext.getContentResolver(),
-                            Uri.withAppendedPath(
-                                    Uri.withAppendedPath(
-                                            Uri.parse("content://mms-sms/"), "conversations"), "obsolete"), null, null);
+                            Threads.OBSOLETE_THREADS_URI, null, null);
 
                     // Notify observers with newly received MM.
                     mUri = uri;

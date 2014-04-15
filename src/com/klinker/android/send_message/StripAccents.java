@@ -16,8 +16,6 @@
 
 package com.klinker.android.send_message;
 
-import android.telephony.SmsMessage;
-
 public class StripAccents {
 
     public static String characters = "\u03B1\u03B2\u03B3\u03B4\u03B5\u03B6\u03B7\u03B8\u03B9\u03BA\u03BB\u03BC\u03BD" +
@@ -35,12 +33,9 @@ public class StripAccents {
             "aaeiouucescrzdtnaieoyuESCRZDTNAEIOYUUrlloRLLOIIee";
 
     public static String stripAccents(String s) {
-        int[] messageData = SmsMessage.calculateLength(s, false);
 
-        if (messageData[0] != 1) {
-            for (int i = 0; i < characters.length(); i++) {
-                s = s.replaceAll(characters.substring(i, i + 1), gsm.substring(i, i + 1));
-            }
+        for (int i = 0; i < characters.length(); i++) {
+            s = s.replaceAll(characters.substring(i, i + 1), gsm.substring(i, i + 1));
         }
 
         return s;

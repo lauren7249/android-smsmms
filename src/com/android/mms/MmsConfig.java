@@ -23,7 +23,11 @@ import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.res.XmlResourceParser;
+import android.preference.PreferenceManager;
+import android.provider.Telephony;
 import android.util.Log;
 
 public class MmsConfig {
@@ -31,8 +35,8 @@ public class MmsConfig {
     private static final boolean DEBUG = true;
     private static final boolean LOCAL_LOGV = false;
 
-    public static final String DEFAULT_HTTP_KEY_X_WAP_PROFILE = "x-wap-profile";
-    public static final String DEFAULT_USER_AGENT = "Android-Mms/2.0";
+    private static final String DEFAULT_HTTP_KEY_X_WAP_PROFILE = "x-wap-profile";
+    private static final String DEFAULT_USER_AGENT = "Android-Mms/2.0";
 
     private static final String MMS_APP_PACKAGE = "com.android.mms";
 
@@ -47,7 +51,7 @@ public class MmsConfig {
      */
     private static boolean mTransIdEnabled = false;
     private static boolean mMmsEnabled = true;                  // default to true
-    private static int mMaxMessageSize = 800 * 1024;            // default to 800k max size
+    private static int mMaxMessageSize = 300 * 1024;            // default to 300k max size
     private static String mUserAgent = DEFAULT_USER_AGENT;
     private static String mUaProfTagName = DEFAULT_HTTP_KEY_X_WAP_PROFILE;
     private static String mUaProfUrl = null;
@@ -323,18 +327,6 @@ public class MmsConfig {
                         errorStr);
             Log.e(TAG, err);
         }
-    }
-
-    public static void setUserAgent(String userAgent) {
-        MmsConfig.mUserAgent = userAgent;
-    }
-
-    public static void setUaProfUrl(String url) {
-        MmsConfig.mUaProfUrl = url;
-    }
-
-    public static void setUaProfTagName(String tagName) {
-        MmsConfig.mUaProfTagName = tagName;
     }
 
 }

@@ -17,30 +17,23 @@
 
 package com.android.mms.util;
 
-import android.content.BroadcastReceiver;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.database.Cursor;
 import android.database.sqlite.SqliteWrapper;
 import android.net.Uri;
 import android.os.Handler;
 import android.preference.PreferenceManager;
-import android.provider.Telephony;
-import android.telephony.ServiceState;
+import android.provider.Telephony.Mms;
 import android.util.Log;
 import android.widget.Toast;
 
-import com.android.internal.telephony.TelephonyProperties;
 import com.google.android.mms.MmsException;
 import com.google.android.mms.pdu_alt.EncodedStringValue;
 import com.google.android.mms.pdu_alt.NotificationInd;
 import com.google.android.mms.pdu_alt.PduPersister;
 import com.klinker.android.send_message.R;
-import com.klinker.android.send_message.Transaction;
 
 public class DownloadManager {
     private static final String TAG = "DownloadManager";
@@ -68,7 +61,7 @@ public class DownloadManager {
         mHandler = new Handler();
         mPreferences = PreferenceManager.getDefaultSharedPreferences(context);
 
-        mAutoDownload = getAutoDownloadState(context);
+        mAutoDownload = getAutoDownloadState(mPreferences);
         if (LOCAL_LOGV) {
             Log.v(TAG, "mAutoDownload ------> " + mAutoDownload);
         }
@@ -84,7 +77,8 @@ public class DownloadManager {
         }
 
         if (sInstance != null) {
-            Log.w(TAG, "Already initialized.");
+            //Log.w(TAG, "Already initialized.");
+        	return;
         }
         sInstance = new DownloadManager(context);
     }
@@ -96,8 +90,8 @@ public class DownloadManager {
         return sInstance;
     }
 
-    static boolean getAutoDownloadState(Context context) {
-        return PreferenceManager.getDefaultSharedPreferences(context).getBoolean("auto_download_mms", true);
+    static boolean getAutoDownloadState(SharedPreferences prefs) {
+        return getAutoDownloadState(prefs, isRoaming());
     }
 
     static boolean getAutoDownloadState(SharedPreferences prefs, boolean roaming) {
@@ -165,7 +159,7 @@ public class DownloadManager {
         // Use the STATUS field to store the state of downloading process
         // because it's useless for M-Notification.ind.
         ContentValues values = new ContentValues(1);
-        values.put("st", state);
+        values.put(Mms.STATUS, state);
         SqliteWrapper.update(mContext, mContext.getContentResolver(),
                     uri, values, null, null);
     }
@@ -198,7 +192,7 @@ public class DownloadManager {
 
     public int getState(Uri uri) {
         Cursor cursor = SqliteWrapper.query(mContext, mContext.getContentResolver(),
-                            uri, new String[] {"st"}, null, null, null);
+                            uri, new String[] {Mms.STATUS}, null, null, null);
 
         if (cursor != null) {
             try {

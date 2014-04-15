@@ -30,6 +30,8 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.PowerManager;
 import android.preference.PreferenceManager;
+import android.provider.Telephony.Mms;
+import android.provider.Telephony.Mms.Inbox;
 import android.util.Log;
 
 import com.android.mms.MmsConfig;
@@ -88,19 +90,11 @@ public class PushReceiver extends BroadcastReceiver {
                             break;
                         }
 
-                        boolean group;
-
-                        try {
-                            group = com.klinker.android.send_message.Transaction.settings.getGroup();
-                        } catch (Exception e) {
-                            group = PreferenceManager.getDefaultSharedPreferences(mContext).getBoolean("group_message", true);
-                        }
-
-                        Uri uri = p.persist(pdu, Uri.parse("content://mms/inbox"), true,
-                                group, null);
+                        Uri uri = p.persist(pdu, Inbox.CONTENT_URI, true,
+                                com.klinker.android.send_message.Transaction.settings.getGroup(), null);
                         // Update thread ID for ReadOrigInd & DeliveryInd.
                         ContentValues values = new ContentValues(1);
-                        values.put("thread_id", threadId);
+                        values.put(Mms.THREAD_ID, threadId);
                         SqliteWrapper.update(mContext, cr, uri, values, null, null);
                         break;
                     }
@@ -121,35 +115,25 @@ public class PushReceiver extends BroadcastReceiver {
                             }
                         }
 
-                        boolean group;
+                        if (!isDuplicateNotification(mContext, nInd)) {
+                            // Save the pdu. If we can start downloading the real pdu immediately,
+                            // don't allow persist() to create a thread for the notificationInd
+                            // because it causes UI jank.
+                            Uri uri = p.persist(pdu, Inbox.CONTENT_URI,
+                                    !NotificationTransaction.allowAutoDownload(mContext),
+                                    com.klinker.android.send_message.Transaction.settings.getGroup(),
+                                    null);
 
-                        try {
-                            group = com.klinker.android.send_message.Transaction.settings.getGroup();
-                        } catch (Exception e) {
-                            group = PreferenceManager.getDefaultSharedPreferences(mContext).getBoolean("group_message", true);
-                        }
-
-                        // Save the pdu. If we can start downloading the real pdu immediately,
-                        // don't allow persist() to create a thread for the notificationInd
-                        // because it causes UI jank.
-                        Uri uri = p.persist(pdu, Uri.parse("content://mms/inbox"),
-                                !NotificationTransaction.allowAutoDownload(mContext),
-                                group,
-                                null);
-
-                        if (NotificationTransaction.allowAutoDownload(mContext)) {
                             // Start service to finish the notification transaction.
                             Intent svc = new Intent(mContext, TransactionService.class);
                             svc.putExtra(TransactionBundle.URI, uri.toString());
                             svc.putExtra(TransactionBundle.TRANSACTION_TYPE,
                                     Transaction.NOTIFICATION_TRANSACTION);
                             mContext.startService(svc);
-                        } else {
-                            Intent notificationBroadcast = new Intent(com.klinker.android.send_message.Transaction.NOTIFY_OF_MMS);
-                            notificationBroadcast.putExtra("receive_through_stock", true);
-                            mContext.sendBroadcast(notificationBroadcast);
+                        } else if (LOCAL_LOGV) {
+                            Log.v(TAG, "Skip downloading duplicate message: "
+                                    + new String(nInd.getContentLocation()));
                         }
-
                         break;
                     }
                     default:
@@ -212,18 +196,18 @@ public class PushReceiver extends BroadcastReceiver {
         }
 
         StringBuilder sb = new StringBuilder('(');
-        sb.append("m_id");
+        sb.append(Mms.MESSAGE_ID);
         sb.append('=');
         sb.append(DatabaseUtils.sqlEscapeString(messageId));
         sb.append(" AND ");
-        sb.append("m_type");
+        sb.append(Mms.MESSAGE_TYPE);
         sb.append('=');
         sb.append(PduHeaders.MESSAGE_TYPE_SEND_REQ);
         // TODO ContentResolver.query() appends closing ')' to the selection argument
         // sb.append(')');
 
         Cursor cursor = SqliteWrapper.query(context, context.getContentResolver(),
-                            Uri.parse("content://mms"), new String[] { "thread_id" },
+                            Mms.CONTENT_URI, new String[] { Mms.THREAD_ID },
                             sb.toString(), null, null);
         if (cursor != null) {
             try {
@@ -248,7 +232,7 @@ public class PushReceiver extends BroadcastReceiver {
             String[] selectionArgs = new String[] { location };
             Cursor cursor = SqliteWrapper.query(
                     context, context.getContentResolver(),
-                    Uri.parse("content://mms"), new String[] { "_id" },
+                    Mms.CONTENT_URI, new String[] { Mms._ID },
                     selection, selectionArgs, null);
             if (cursor != null) {
                 try {

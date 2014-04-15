@@ -18,12 +18,13 @@
 package com.android.mms.transaction;
 
 import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SqliteWrapper;
 import android.net.NetworkUtils;
+import android.provider.Telephony;
 import android.text.TextUtils;
 import android.util.Log;
-import com.android.mms.MmsConfig;
 import com.klinker.android.send_message.Transaction;
-import com.klinker.android.send_message.Utils;
 
 /**
  * Container of transaction settings. Instances of this class are contained
@@ -38,8 +39,6 @@ public class TransactionSettings {
     private String mServiceCenter;
     private String mProxyAddress;
     private int mProxyPort = -1;
-    private String mUserAgent;
-    private String mUserAgentProfileUrl;
 
     private static final String[] APN_PROJECTION = {
             "type",            // 0
@@ -59,98 +58,76 @@ public class TransactionSettings {
      */
     public TransactionSettings(Context context, String apnName) {
             Log.v(TAG, "TransactionSettings: apnName: " + apnName);
-//        String selection = "current" + " IS NOT NULL";
-//        String[] selectionArgs = null;
-//        if (!TextUtils.isEmpty(apnName)) {
-//            selection += " AND " + "apn" + "=?";
-//            selectionArgs = new String[]{ apnName.trim() };
-//        }
-//
-//        Cursor cursor;
-//
-//        try {
-//            cursor = SqliteWrapper.query(context, context.getContentResolver(),
-//                                Telephony.Carriers.CONTENT_URI,
-//                                APN_PROJECTION, selection, selectionArgs, null);
-//
-//                Log.v(TAG, "TransactionSettings looking for apn: " + selection + " returned: " +
-//                        (cursor == null ? "null cursor" : (cursor.getCount() + " hits")));
-//        } catch (SecurityException e) {
-//            e.printStackTrace();
-//            cursor = null;
-//        }
-//
-//        if (cursor == null) {
-//            Log.e(TAG, "Apn is not found in Database!");
-            if (Transaction.settings == null) {
-                Transaction.settings = Utils.getDefaultSendSettings(context);
-            }
+        String selection = "current" + " IS NOT NULL";
+        String[] selectionArgs = null;
+        if (!TextUtils.isEmpty(apnName)) {
+            selection += " AND " + "apn" + "=?";
+            selectionArgs = new String[]{ apnName.trim() };
+        }
 
+        Cursor cursor;
+
+        try {
+            cursor = SqliteWrapper.query(context, context.getContentResolver(),
+                                Telephony.Carriers.CONTENT_URI,
+                                APN_PROJECTION, selection, selectionArgs, null);
+
+                Log.v(TAG, "TransactionSettings looking for apn: " + selection + " returned: " +
+                        (cursor == null ? "null cursor" : (cursor.getCount() + " hits")));
+        } catch (SecurityException e) {
+            e.printStackTrace();
+            cursor = null;
+        }
+
+        if (cursor == null) {
+            Log.e(TAG, "Apn is not found in Database!");
             mServiceCenter = NetworkUtils.trimV4AddrZeros(Transaction.settings.getMmsc());
             mProxyAddress = NetworkUtils.trimV4AddrZeros(Transaction.settings.getProxy());
 
-            // Set up the agent, profile url and tag name to be used in the mms request if they are attached in settings
-            String agent = Transaction.settings.getAgent();
-            if (agent != null && !agent.trim().equals("")) {
-                MmsConfig.setUserAgent(agent);
-                Log.v(TAG, "set user agent");
-            }
-
-            String uaProfUrl = Transaction.settings.getUserProfileUrl();
-            if (uaProfUrl != null && !uaProfUrl.trim().equals("")) {
-                MmsConfig.setUaProfUrl(uaProfUrl);
-                Log.v(TAG, "set user agent profile url");
-            }
-
-            String uaProfTagName = Transaction.settings.getUaProfTagName();
-            if (uaProfTagName != null && !uaProfTagName.trim().equals("")) {
-                MmsConfig.setUaProfTagName(uaProfTagName);
-                Log.v(TAG, "set user agent profile tag name");
-            }
-
             if (isProxySet()) {
-                mProxyPort = Integer.parseInt(Transaction.settings.getPort());
+                mProxyPort = Integer.parseInt(Transaction.settings.getProxy());
             }
-//        }
+            return;
+        }
 
-//        boolean sawValidApn = false;
-//        try {
-//            while (cursor.moveToNext() && TextUtils.isEmpty(mServiceCenter)) {
-//                // Read values from APN settings
-//                if (isValidApnType(cursor.getString(COLUMN_TYPE), "mms")) {
-//                    sawValidApn = true;
-//
-//                    String mmsc = cursor.getString(COLUMN_MMSC);
-//                    if (mmsc == null) {
-//                        continue;
-//                    }
-//
-//                    mServiceCenter = NetworkUtils.trimV4AddrZeros(mmsc.trim());
-//                    mProxyAddress = NetworkUtils.trimV4AddrZeros(
-//                            cursor.getString(COLUMN_MMSPROXY));
-//                    if (isProxySet()) {
-//                        String portString = cursor.getString(COLUMN_MMSPORT);
-//                        try {
-//                            mProxyPort = Integer.parseInt(portString);
-//                        } catch (NumberFormatException e) {
-//                            if (TextUtils.isEmpty(portString)) {
-//                                Log.w(TAG, "mms port not set!");
-//                            } else {
-//                                Log.e(TAG, "Bad port number format: " + portString, e);
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//        } finally {
-//            cursor.close();
-//        }
-//
-//        Log.v(TAG, "APN setting: MMSC: " + mServiceCenter + " looked for: " + selection);
-//
-//        if (sawValidApn && TextUtils.isEmpty(mServiceCenter)) {
-//            Log.e(TAG, "Invalid APN setting: MMSC is empty");
-//        }
+        boolean sawValidApn = false;
+        try {
+            while (cursor.moveToNext() && TextUtils.isEmpty(mServiceCenter)) {
+                // Read values from APN settings
+                if (isValidApnType(cursor.getString(COLUMN_TYPE), "mms")) {
+                    sawValidApn = true;
+
+                    String mmsc = cursor.getString(COLUMN_MMSC);
+                    if (mmsc == null) {
+                        continue;
+                    }
+
+                    mServiceCenter = NetworkUtils.trimV4AddrZeros(mmsc.trim());
+                    mProxyAddress = NetworkUtils.trimV4AddrZeros(
+                            cursor.getString(COLUMN_MMSPROXY));
+                    if (isProxySet()) {
+                        String portString = cursor.getString(COLUMN_MMSPORT);
+                        try {
+                            mProxyPort = Integer.parseInt(portString);
+                        } catch (NumberFormatException e) {
+                            if (TextUtils.isEmpty(portString)) {
+                                Log.w(TAG, "mms port not set!");
+                            } else {
+                                Log.e(TAG, "Bad port number format: " + portString, e);
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            cursor.close();
+        }
+
+        Log.v(TAG, "APN setting: MMSC: " + mServiceCenter + " looked for: " + selection);
+
+        if (sawValidApn && TextUtils.isEmpty(mServiceCenter)) {
+            Log.e(TAG, "Invalid APN setting: MMSC is empty");
+        }
     }
 
     /**

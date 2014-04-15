@@ -22,10 +22,10 @@ import java.util.Arrays;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.Intent;
 import android.database.sqlite.SqliteWrapper;
 import android.net.Uri;
-import android.provider.Telephony;
+import android.provider.Telephony.Mms;
+import android.provider.Telephony.Mms.Sent;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -80,7 +80,6 @@ public class SendTransaction extends Transaction implements Runnable {
     }
 
     public void run() {
-        StringBuilder builder = new StringBuilder();
         try {
             RateController.init(mContext);
             RateController rateCtlr = RateController.getInstance();
@@ -99,7 +98,7 @@ public class SendTransaction extends Transaction implements Runnable {
 
             // Persist the new date value into database.
             ContentValues values = new ContentValues(1);
-            values.put("date", date);
+            values.put(Mms.DATE, date);
             SqliteWrapper.update(mContext, mContext.getContentResolver(),
                                  mSendReqURI, values, null, null);
 
@@ -116,13 +115,11 @@ public class SendTransaction extends Transaction implements Runnable {
             SendingProgressTokenManager.remove(tokenKey);
 
                 String respStr = new String(response);
-                builder.append("[SendTransaction] run: send mms msg (" + mId + "), resp=" + respStr);
                 Log.d(TAG, "[SendTransaction] run: send mms msg (" + mId + "), resp=" + respStr);
 
             SendConf conf = (SendConf) new PduParser(response).parse();
             if (conf == null) {
                 Log.e(TAG, "No M-Send.conf received.");
-                builder.append("No M-Send.conf received.\n");
             }
 
             // Check whether the responding Transaction-ID is consistent
@@ -132,8 +129,6 @@ public class SendTransaction extends Transaction implements Runnable {
             if (!Arrays.equals(reqId, confId)) {
                 Log.e(TAG, "Inconsistent Transaction-ID: req="
                         + new String(reqId) + ", conf=" + new String(confId));
-                builder.append("Inconsistent Transaction-ID: req="
-                        + new String(reqId) + ", conf=" + new String(confId) + "\n");
                 return;
             }
 
@@ -142,23 +137,22 @@ public class SendTransaction extends Transaction implements Runnable {
             // into the related M-Send.req.
             values = new ContentValues(2);
             int respStatus = conf.getResponseStatus();
-            values.put("resp_st", respStatus);
+            values.put(Mms.RESPONSE_STATUS, respStatus);
 
             if (respStatus != PduHeaders.RESPONSE_STATUS_OK) {
                 SqliteWrapper.update(mContext, mContext.getContentResolver(),
                                      mSendReqURI, values, null, null);
                 Log.e(TAG, "Server returned an error code: " + respStatus);
-                builder.append("Server returned an error code: " + respStatus + "\n");
                 return;
             }
 
             String messageId = PduPersister.toIsoString(conf.getMessageId());
-            values.put("m_id", messageId);
+            values.put(Mms.MESSAGE_ID, messageId);
             SqliteWrapper.update(mContext, mContext.getContentResolver(),
                                  mSendReqURI, values, null, null);
 
             // Move M-Send.req from Outbox into Sent.
-            Uri uri = persister.move(mSendReqURI, Uri.parse("content://mms/sent"));
+            Uri uri = persister.move(mSendReqURI, Sent.CONTENT_URI);
 
             mTransactionState.setState(TransactionState.SUCCESS);
             mTransactionState.setContentUri(uri);
@@ -169,11 +163,6 @@ public class SendTransaction extends Transaction implements Runnable {
                 mTransactionState.setState(TransactionState.FAILED);
                 mTransactionState.setContentUri(mSendReqURI);
                 Log.e(TAG, "Delivery failed.");
-                builder.append("Delivery failed\n");
-
-                Intent intent = new Intent(com.klinker.android.send_message.Transaction.MMS_ERROR);
-                intent.putExtra("stack", builder.toString());
-                mContext.sendBroadcast(intent);
             }
             notifyObservers();
         }

@@ -16,6 +16,7 @@
 
 package com.klinker.android.send_message;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.*;
@@ -41,10 +42,12 @@ import com.android.mms.transaction.MmsMessageSender;
 import com.android.mms.transaction.ProgressCallbackEntity;
 import com.android.mms.util.DownloadManager;
 import com.android.mms.util.RateController;
-import com.google.android.mms.*;
+import com.google.android.mms.APN;
+import com.google.android.mms.APNHelper;
+import com.google.android.mms.ContentType;
+import com.google.android.mms.MMSPart;
 import com.google.android.mms.pdu_alt.*;
 import com.google.android.mms.smil.SmilHelper;
-import org.w3c.dom.smil.ElementExclusiveTimeContainer;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -77,7 +80,8 @@ public class Transaction {
     public static final String VOICE_TOKEN = "com.klinker.android.send_message.RNRSE";
     public static final String NOTIFY_OF_DELIVERY = "com.klinker.android.send_message.NOTIFY_DELIVERY";
     public static final String NOTIFY_OF_MMS = "com.klinker.android.messaging.NEW_MMS_DOWNLOADED";
-
+    public boolean isRegistered=false;
+    
     public static final long NO_THREAD_ID = 0;
 
     /**
@@ -132,10 +136,9 @@ public class Transaction {
             try { Looper.prepare(); } catch (Exception e) { }
             RateController.init(context);
             DownloadManager.init(context);
-            sendMmsMessage(message.getText(), message.getAddresses(), message.getImages(), message.getMedia(), message.getMediaMimeType(), message.getSubject());
+            sendMmsMessage(message.getText(), message.getAddresses(), message.getMmsAttachments(), message.getSubject());
         } else {
-            if (message.getType() == Message.TYPE_SMSMMS) {
-                Log.v("send_transaction", "sending sms");
+             if (message.getType() == Message.TYPE_SMSMMS) {
                 sendSmsMessage(message.getText(), message.getAddresses(), threadId);
             } else {
                 Log.v("send_transaction", "error with message type, aborting...");
@@ -145,11 +148,93 @@ public class Transaction {
     }
 
     private void sendSmsMessage(String text, String[] addresses, long threadId) {
-        Log.v("send_transaction", "message text: " + text);
-        Uri messageUri = null;
-        int messageId = 0;
+        // set up sent and delivered pending intents to be used with message request
+        PendingIntent sentPI = PendingIntent.getBroadcast(context, 0, new Intent(SMS_SENT), 0);
+        PendingIntent deliveredPI = PendingIntent.getBroadcast(context, 0, new Intent(SMS_DELIVERED), 0);
+
+        ArrayList<PendingIntent> sPI = new ArrayList<PendingIntent>();
+        ArrayList<PendingIntent> dPI = new ArrayList<PendingIntent>();
+
+        String body = text;
+
+        // edit the body of the text if unicode needs to be stripped or signature needs to be added
+        if (settings.getStripUnicode()) {
+            body = StripAccents.stripAccents(body);
+        }
+
+        if (!settings.getSignature().equals("")) {
+            body += "\n" + settings.getSignature();
+        }
+
+        if (!settings.getPreText().equals("")) {
+            body = settings.getPreText() + " " + body;
+        }
+
+        SmsManager smsManager = SmsManager.getDefault();
+
+        if (settings.getSplit()) {
+            // figure out the length of supported message
+            int[] splitData = SmsMessage.calculateLength(body, false);
+
+            // we take the current length + the remaining length to get the total number of characters
+            // that message set can support, and then divide by the number of message that will require
+            // to get the length supported by a single message
+            int length = (body.length() + splitData[2]) / splitData[0];
+
+            boolean counter = false;
+            if (settings.getSplitCounter() && body.length() > length) {
+                counter = true;
+                length -= 6;
+            }
+
+            // get the split messages
+            String[] textToSend = splitByLength(body, length, counter);
+
+            // send each message part to each recipient attached to message
+            for (int i = 0; i < textToSend.length; i++) {
+                ArrayList<String> parts = smsManager.divideMessage(textToSend[i]);
+
+                for (int j = 0; j < parts.size(); j++) {
+                    sPI.add(saveMessage ? sentPI : null);
+                    dPI.add(settings.getDeliveryReports() && saveMessage ? deliveredPI : null);
+                }
+
+                for (int j = 0; j < addresses.length; j++) {
+                    smsManager.sendMultipartTextMessage(addresses[j], null, parts, sPI, dPI);
+                }
+            }
+        } else {
+            // send the message normally without forcing anything to be split
+            ArrayList<String> parts = smsManager.divideMessage(body);
+
+            for (int i = 0; i < parts.size(); i++) {
+                sPI.add(saveMessage ? sentPI : null);
+                dPI.add(settings.getDeliveryReports() && saveMessage ? deliveredPI : null);
+            }
+
+            try {
+                for (int i = 0; i < addresses.length; i++) {
+                    smsManager.sendMultipartTextMessage(addresses[i], null, parts, sPI, dPI);
+                }
+            } catch (Exception e) {
+                // whoops...
+                e.printStackTrace();
+
+                try {
+                    ((Activity) context).getWindow().getDecorView().findViewById(android.R.id.content).post(new Runnable() {
+
+                        @Override
+                        public void run() {
+                            Toast.makeText(context, "Message could not be sent", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (Exception f) {
+
+                }
+            }
+        }
+
         if (saveMessage) {
-            Log.v("send_transaction", "saving message");
             // add signature to original text to be saved in database (does not strip unicode for saving though)
             if (!settings.getSignature().equals("")) {
                 text += "\n" + settings.getSignature();
@@ -163,116 +248,19 @@ public class Transaction {
                 values.put("body", settings.getStripUnicode() ? StripAccents.stripAccents(text) : text);
                 values.put("date", cal.getTimeInMillis() + "");
                 values.put("read", 1);
-                values.put("type", 4);
 
                 // attempt to create correct thread id if one is not supplied
                 if (threadId == NO_THREAD_ID || addresses.length > 1) {
                     threadId = Utils.getOrCreateThreadId(context, addresses[i]);
                 }
 
-                Log.v("send_transaction", "saving message with thread id: " + threadId);
-
                 values.put("thread_id", threadId);
-                messageUri = context.getContentResolver().insert(Uri.parse("content://sms/"), values);
-
-                Log.v("send_transaction", "inserted to uri: " + messageUri);
-
-                Cursor query = context.getContentResolver().query(messageUri, new String[] {"_id"}, null, null, null);
-                if (query != null && query.moveToFirst()) {
-                    messageId = query.getInt(0);
-                }
-
-                Log.v("send_transaction", "message id: " + messageId);
-
-                // set up sent and delivered pending intents to be used with message request
-                PendingIntent sentPI = PendingIntent.getBroadcast(context, messageId, new Intent(SMS_SENT)
-                        .putExtra("message_uri", messageUri == null ? "" : messageUri.toString()), PendingIntent.FLAG_UPDATE_CURRENT);
-                PendingIntent deliveredPI = PendingIntent.getBroadcast(context, messageId, new Intent(SMS_DELIVERED)
-                        .putExtra("message_uri", messageUri == null ? "" : messageUri.toString()), PendingIntent.FLAG_UPDATE_CURRENT);
-
-                ArrayList<PendingIntent> sPI = new ArrayList<PendingIntent>();
-                ArrayList<PendingIntent> dPI = new ArrayList<PendingIntent>();
-
-                String body = text;
-
-                // edit the body of the text if unicode needs to be stripped
-                if (settings.getStripUnicode()) {
-                    body = StripAccents.stripAccents(body);
-                }
-
-                if (!settings.getPreText().equals("")) {
-                    body = settings.getPreText() + " " + body;
-                }
-
-                SmsManager smsManager = SmsManager.getDefault();
-                Log.v("send_transaction", "found sms manager");
-
-                if (settings.getSplit()) {
-                    Log.v("send_transaction", "splitting message");
-                    // figure out the length of supported message
-                    int[] splitData = SmsMessage.calculateLength(body, false);
-
-                    // we take the current length + the remaining length to get the total number of characters
-                    // that message set can support, and then divide by the number of message that will require
-                    // to get the length supported by a single message
-                    int length = (body.length() + splitData[2]) / splitData[0];
-                    Log.v("send_transaction", "length: " + length);
-
-                    boolean counter = false;
-                    if (settings.getSplitCounter() && body.length() > length) {
-                        counter = true;
-                        length -= 6;
-                    }
-
-                    // get the split messages
-                    String[] textToSend = splitByLength(body, length, counter);
-
-                    // send each message part to each recipient attached to message
-                    for (int j = 0; j < textToSend.length; j++) {
-                        ArrayList<String> parts = smsManager.divideMessage(textToSend[j]);
-
-                        for (int k = 0; k < parts.size(); k++) {
-                            sPI.add(saveMessage ? sentPI : null);
-                            dPI.add(settings.getDeliveryReports() && saveMessage ? deliveredPI : null);
-                        }
-
-                        Log.v("send_transaction", "sending split message");
-                        smsManager.sendMultipartTextMessage(addresses[i], null, parts, sPI, dPI);
-                    }
-                } else {
-                    Log.v("send_transaction", "sending without splitting");
-                    // send the message normally without forcing anything to be split
-                    ArrayList<String> parts = smsManager.divideMessage(body);
-
-                    for (int j = 0; j < parts.size(); j++) {
-                        sPI.add(saveMessage ? sentPI : null);
-                        dPI.add(settings.getDeliveryReports() && saveMessage ? deliveredPI : null);
-                    }
-
-                    try {
-                        Log.v("send_transaction", "sent message");
-                        smsManager.sendMultipartTextMessage(addresses[i], null, parts, sPI, dPI);
-                    } catch (Exception e) {
-                        // whoops...
-                        Log.v("send_transaction", "error sending message");
-                        e.printStackTrace();
-
-                        try {
-                            ((Activity) context).getWindow().getDecorView().findViewById(android.R.id.content).post(new Runnable() {
-
-                                @Override
-                                public void run() {
-                                    Toast.makeText(context, "Message could not be sent", Toast.LENGTH_LONG).show();
-                                }
-                            });
-                        } catch (Exception f) { }
-                    }
-                }
+                context.getContentResolver().insert(Uri.parse("content://sms/outbox"), values);
             }
         }
     }
 
-    private void sendMmsMessage(String text, String[] addresses, Bitmap[] image, byte[] media, String mimeType, String subject) {
+    private void sendMmsMessage(String text, String[] addresses, ArrayList<DeviceMessageAttachment> attachments, String subject) {
         // merge the string[] of addresses into a single string so they can be inserted into the database easier
         String address = "";
 
@@ -281,52 +269,17 @@ public class Transaction {
         }
 
         address = address.trim();
-
-        // create the parts to send
-        ArrayList<MMSPart> data = new ArrayList<MMSPart>();
-
-        for (int i = 0; i < image.length; i++) {
-            // turn bitmap into byte array to be stored
-            byte[] imageBytes = Message.bitmapToByteArray(image[i]);
-
-            MMSPart part = new MMSPart();
-            part.MimeType = "image/jpeg";
-            part.Name = "image" + i;
-            part.Data = imageBytes;
-            data.add(part);
-        }
-
-        // add any extra media according to their mimeType set in the message
-        //      eg. videos, audio, contact cards, location maybe?
-        if (media.length > 0 && mimeType != null) {
-            MMSPart part = new MMSPart();
-            part.MimeType = mimeType;
-            part.Name = mimeType.split("/")[0];
-            part.Data = media;
-            data.add(part);     	
-        }
         
         if (!text.equals("")) {
             // add text to the end of the part and send
-            MMSPart part = new MMSPart();
-            part.Name = "text";
-            part.MimeType = "text/plain";
-            part.Data = text.getBytes();
-            data.add(part);
+            attachments.add(new DeviceMessageAttachment("text", "text/plain", text.getBytes()));
         }
 
-        MessageInfo info;
-
-        try {
-            info = getBytes(address.split(" "), data.toArray(new MMSPart[data.size()]), subject);
-        } catch (MmsException e) {
-            Toast.makeText(context, e.getMessage(), Toast.LENGTH_SHORT).show();
-            return;
-        }
+        MessageInfo info = getBytes(address.split(" "), attachments.toArray(new MMSPart[attachments.size()]), subject);
 
         try {
             MmsMessageSender sender = new MmsMessageSender(context, info.location, info.bytes.length);
-            sender.sendMessage(info.token);
+            sender.sendMessage(4444L);
 
             IntentFilter filter = new IntentFilter();
             filter.addAction(ProgressCallbackEntity.PROGRESS_STATUS_ACTION);
@@ -344,13 +297,8 @@ public class Transaction {
 
                     if (progress == ProgressCallbackEntity.PROGRESS_COMPLETE) {
                         context.sendBroadcast(new Intent(REFRESH));
-
-                        try {
-                            context.unregisterReceiver(this);
-                        } catch (Exception e) {
-                            // TODO fix me
-                            // receiver is not registered force close error... hmm.
-                        }
+                        context.unregisterReceiver(this);
+                        isRegistered = false;
                     } else if (progress == ProgressCallbackEntity.PROGRESS_ABORT) {
                         // This seems to get called only after the progress has reached 100 and then something else goes wrong, so here we will try and send again and see if it works
                         Log.v("sending_mms_library", "sending aborted for some reason...");
@@ -359,8 +307,9 @@ public class Transaction {
 
             };
 
+            isRegistered =true;
             context.registerReceiver(receiver, filter);
-        } catch (Throwable e) {
+        } catch (Exception e) {
             e.printStackTrace();
             // insert the pdu into the database and return the bytes to send
             if (settings.getWifiMmsFix()) {
@@ -371,8 +320,8 @@ public class Transaction {
         }
     }
 
-    private MessageInfo getBytes(String[] recipients, MMSPart[] parts, String subject)
-                throws MmsException {
+    @SuppressLint("NewApi")
+	private MessageInfo getBytes(String[] recipients, MMSPart[] parts, String subject) {
         final SendReq sendRequest = new SendReq();
 
         // create send request addresses
@@ -435,13 +384,7 @@ public class Transaction {
 
         // create byte array which will actually be sent
         final PduComposer composer = new PduComposer(context, sendRequest);
-        final byte[] bytesToSend;
-
-        try {
-            bytesToSend = composer.make();
-        } catch (OutOfMemoryError e) {
-            throw new MmsException("Out of memory!");
-        }
+        final byte[] bytesToSend = composer.make();
 
         MessageInfo info = new MessageInfo();
         info.bytes = bytesToSend;
@@ -449,7 +392,7 @@ public class Transaction {
         if (saveMessage) {
             try {
                 PduPersister persister = PduPersister.getPduPersister(context);
-                info.location = persister.persist(sendRequest, Uri.parse("content://mms/outbox"), true, settings.getGroup(), null);
+                info.location = persister.persist(sendRequest, Telephony.Mms.Outbox.CONTENT_URI, true, settings.getGroup(), null);
             } catch (Exception e) {
                 Log.v("sending_mms_library", "error saving mms message");
                 e.printStackTrace();
@@ -459,27 +402,14 @@ public class Transaction {
             }
         }
 
-        try {
-            Cursor query = context.getContentResolver().query(info.location, new String[] {"thread_id"}, null, null, null);
-            if (query != null && query.moveToFirst()) {
-                info.token = query.getLong(query.getColumnIndex("thread_id"));
-            } else {
-                // just default sending token for what I had before
-                info.token = 4444L;
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            info.token = 4444L;
-        }
-
         return info;
     }
 
     private class MessageInfo {
-        public long token;
         public Uri location;
         public byte[] bytes;
     }
+
 
     // splits text and adds split counter when applicable
     private String[] splitByLength(String s, int chunkSize, boolean counter) {
@@ -544,14 +474,16 @@ public class Transaction {
                         Log.v("sending_mms_library", "sending through broadcast receiver");
                         alreadySending = true;
                         sendData(bytesToSend);
-
+                      
                         context.unregisterReceiver(this);
+                        isRegistered =false;
                     }
 
                 }
 
             };
 
+            isRegistered =true;
             context.registerReceiver(receiver, filter);
 
             try {
@@ -568,6 +500,7 @@ public class Transaction {
                         try {
                             Log.v("sending_mms_library", "sending through handler");
                             context.unregisterReceiver(receiver);
+                            isRegistered =false;
                         } catch (Exception e) {
 
                         }
@@ -634,6 +567,7 @@ public class Transaction {
                             }
 
                             context.unregisterReceiver(this);
+                            isRegistered =false;
                         }
 
                     }
@@ -655,6 +589,7 @@ public class Transaction {
                         if (!alreadySending) {
                             try {
                                 context.unregisterReceiver(receiver);
+                                isRegistered =false;
                             } catch (Exception e) {
 
                             }
@@ -738,22 +673,21 @@ public class Transaction {
                     if (progress == ProgressCallbackEntity.PROGRESS_COMPLETE) {
                         if (saveMessage) {
                             Cursor query = context.getContentResolver().query(Uri.parse("content://mms"), new String[]{"_id"}, null, null, "date desc");
-                            if (query != null && query.moveToFirst()) {
-                                String id = query.getString(query.getColumnIndex("_id"));
-                                query.close();
+                            query.moveToFirst();
+                            String id = query.getString(query.getColumnIndex("_id"));
+                            query.close();
 
-                                // move to the sent box
-                                ContentValues values = new ContentValues();
-                                values.put("msg_box", 2);
-                                String where = "_id" + " = '" + id + "'";
-                                context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
-                            }
+                            // move to the sent box
+                            ContentValues values = new ContentValues();
+                            values.put("msg_box", 2);
+                            String where = "_id" + " = '" + id + "'";
+                            context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
                         }
 
                         context.sendBroadcast(new Intent(REFRESH));
-
-                        try { context.unregisterReceiver(this); } catch (Exception e) { /* Receiver not registered */ }
-
+                        context.unregisterReceiver(this);
+                        isRegistered =false;
+                        
                         // give everything time to finish up, may help the abort being shown after the progress is already 100
                         new Handler().postDelayed(new Runnable() {
                             @Override
@@ -768,7 +702,8 @@ public class Transaction {
                         // This seems to get called only after the progress has reached 100 and then something else goes wrong, so here we will try and send again and see if it works
                         Log.v("sending_mms_library", "sending aborted for some reason...");
                         context.unregisterReceiver(this);
-
+                        isRegistered =false;
+                        
                         if (numRetries < NUM_RETRIES) {
                             // sleep and try again in three seconds to see if that give wifi and mobile data a chance to toggle in time
                             try {
@@ -789,7 +724,7 @@ public class Transaction {
                 }
 
             };
-
+            isRegistered =true;
             context.registerReceiver(receiver, filter);
 
             // This is where the actual post request is made to send the bytes we previously created through the given apns
@@ -823,16 +758,15 @@ public class Transaction {
 
         if (saveMessage) {
             Cursor query = context.getContentResolver().query(Uri.parse("content://mms"), new String[]{"_id"}, null, null, "date desc");
-            if (query != null && query.moveToFirst()) {
-                String id = query.getString(query.getColumnIndex("_id"));
-                query.close();
+            query.moveToFirst();
+            String id = query.getString(query.getColumnIndex("_id"));
+            query.close();
 
-                // mark message as failed
-                ContentValues values = new ContentValues();
-                values.put("msg_box", 5);
-                String where = "_id" + " = '" + id + "'";
-                context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
-            }
+            // mark message as failed
+            ContentValues values = new ContentValues();
+            values.put("msg_box", 5);
+            String where = "_id" + " = '" + id + "'";
+            context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
         }
 
         ((Activity) context).getWindow().getDecorView().findViewById(android.R.id.content).post(new Runnable() {
@@ -844,11 +778,11 @@ public class Transaction {
 
                 // broadcast that mms has failed and you can notify user from there if you would like
                 context.sendBroadcast(new Intent(MMS_ERROR));
-
             }
 
         });
     }
+
 
     private Uri insert(String[] to, MMSPart[] parts, String subject) {
         try {
@@ -979,8 +913,7 @@ public class Transaction {
      * @return true if the message will be mms, otherwise false
      */
     public boolean checkMMS(Message message) {
-        return message.getImages().length != 0 ||
-                (message.getMedia().length != 0 && message.getMediaMimeType() != null) ||
+        return message.getMmsAttachments().size() > 0 ||
                 (settings.getSendLongAsMms() && Utils.getNumPages(settings, message.getText()) > settings.getSendLongAsMmsAfter() && message.getType() != Message.TYPE_VOICE) ||
                 (message.getAddresses().length > 1 && settings.getGroup()) ||
                 message.getSubject() != null;
@@ -992,6 +925,7 @@ public class Transaction {
     private void reinstateWifi() {
         try {
             context.unregisterReceiver(settings.discon);
+            isRegistered =false;
         } catch (Exception f) {
 
         }
@@ -1014,6 +948,7 @@ public class Transaction {
             settings.currentWifiState = wifi.isWifiEnabled();
             wifi.disconnect();
             settings.discon = new DisconnectWifi();
+            isRegistered =true;
             context.registerReceiver(settings.discon, new IntentFilter(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION));
             settings.currentDataState = Utils.isMobileDataEnabled(context);
             Utils.setMobileDataEnabled(context, true);
@@ -1021,6 +956,7 @@ public class Transaction {
             wifi.disconnect();
             wifi.disconnect();
             settings.discon = new DisconnectWifi();
+            isRegistered =true;
             context.registerReceiver(settings.discon, new IntentFilter(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION));
             Utils.setMobileDataEnabled(context, true);
         }
