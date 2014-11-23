@@ -195,6 +195,8 @@ public class NotificationTransaction extends Transaction implements Runnable {
                 } else {
                     // Save the received PDU (must be a M-RETRIEVE.CONF).
                     PduPersister p = PduPersister.getPduPersister(mContext);
+                    if(com.klinker.android.send_message.Transaction.settings==null)
+                    	Log.i("","com.klinker.android.send_message.Transaction.settings is null");
                     Uri uri = p.persist(pdu, Inbox.CONTENT_URI, true,
                             com.klinker.android.send_message.Transaction.settings.getGroup(), null);
 

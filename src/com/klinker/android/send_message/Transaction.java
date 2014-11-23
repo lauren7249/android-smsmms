@@ -63,7 +63,7 @@ import java.util.concurrent.ExecutionException;
  */
 public class Transaction {
 
-    public static Settings settings;
+    public static Settings settings = new Settings();
     private Context context;
     private ConnectivityManager mConnMgr;
 
