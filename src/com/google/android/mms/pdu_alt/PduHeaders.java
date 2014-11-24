@@ -548,7 +548,7 @@ public class PduHeaders {
      * @return the EncodedStringValue value of the pdu header
      *          with specified header field
      */
-    protected EncodedStringValue getEncodedStringValue(int field) {
+    public EncodedStringValue getEncodedStringValue(int field) {
         return (EncodedStringValue) mHeaderMap.get(field);
     }
 
@@ -559,7 +559,7 @@ public class PduHeaders {
      * @return the EncodeStringValue array of the pdu header
      *          with specified header field
      */
-    protected EncodedStringValue[] getEncodedStringValues(int field) {
+    public EncodedStringValue[] getEncodedStringValues(int field) {
         ArrayList<EncodedStringValue> list =
                 (ArrayList<EncodedStringValue>) mHeaderMap.get(field);
         if (null == list) {
