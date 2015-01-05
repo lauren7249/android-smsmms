@@ -299,6 +299,7 @@ public class Transaction {
                         context.sendBroadcast(new Intent(REFRESH));
                         context.unregisterReceiver(this);
                         isRegistered = false;
+                        
                     } else if (progress == ProgressCallbackEntity.PROGRESS_ABORT) {
                         // This seems to get called only after the progress has reached 100 and then something else goes wrong, so here we will try and send again and see if it works
                         Log.v("sending_mms_library", "sending aborted for some reason...");
@@ -673,15 +674,18 @@ public class Transaction {
                     if (progress == ProgressCallbackEntity.PROGRESS_COMPLETE) {
                         if (saveMessage) {
                             Cursor query = context.getContentResolver().query(Uri.parse("content://mms"), new String[]{"_id"}, null, null, "date desc");
-                            query.moveToFirst();
-                            String id = query.getString(query.getColumnIndex("_id"));
-                            query.close();
+                            if (query!=null) {
+                            	query.moveToFirst();
+                                String id = query.getString(query.getColumnIndex("_id"));
+                                query.close();
 
-                            // move to the sent box
-                            ContentValues values = new ContentValues();
-                            values.put("msg_box", 2);
-                            String where = "_id" + " = '" + id + "'";
-                            context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
+                                // move to the sent box
+                                ContentValues values = new ContentValues();
+                                values.put("msg_box", 2);
+                                String where = "_id" + " = '" + id + "'";
+                                context.getContentResolver().update(Uri.parse("content://mms"), values, where, null);
+                            	
+                            }
                         }
 
                         context.sendBroadcast(new Intent(REFRESH));
